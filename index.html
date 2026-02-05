@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Savonius Master Simulation - Timothy's Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #0a0e14; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #00ffcc; }
+        #interface {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; padding: 20px; box-sizing: border-box;
+            display: flex; justify-content: space-between;
+        }
+        .panel {
+            background: rgba(10, 20, 30, 0.85); border: 1px solid #00ffcc;
+            padding: 20px; pointer-events: auto; width: 280px; height: fit-content;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+        }
+        .metric { font-family: 'Courier New', monospace; font-size: 1.5em; color: #fff; text-shadow: 0 0 5px #00ffcc; }
+        label { display: block; font-size: 0.75em; margin-top: 10px; color: #88a; text-transform: uppercase; }
+        input[type=range] { width: 100%; accent-color: #00ffcc; cursor: crosshair; }
+        .val-disp { float: right; color: #00ffcc; }
+        hr { border: 0; border-top: 1px solid #224444; margin: 15px 0; }
+    </style>
+</head>
+<body>
+
+<div id="interface">
+    <div class="panel">
+        <div style="font-weight: bold; border-bottom: 1px solid #00ffcc; margin-bottom: 10px;">TELEMETRY</div>
+        <label>Shaft Velocity</label>
+        <div class="metric"><span id="rpmVal">0</span> RPM</div>
+        <label>Generator Output</label>
+        <div class="metric"><span id="wattVal">0.00</span> W</div>
+        <hr>
+        <label>Effective Wind (Horizontal)</label>
+        <div id="effWind">0.0 m/s</div>
+    </div>
+
+    <div class="panel">
+        <div style="font-weight: bold; border-bottom: 1px solid #00ffcc; margin-bottom: 10px;">ENVIRONMENT & DESIGN</div>
+        
+        <label>Wind Speed <span id="sV" class="val-disp">12</span></label>
+        <input type="range" id="speed" min="0" max="60" value="12">
+        
+        <label>Wind Direction X (East/West)</label>
+        <input type="range" id="windX" min="-1" max="1" step="0.1" value="0">
+        <label>Wind Direction Y (Up/Down)</label>
+        <input type="range" id="windY" min="-1" max="1" step="0.1" value="0">
+        <label>Wind Direction Z (North/South)</label>
+        <input type="range" id="windZ" min="-1" max="1" step="0.1" value="1">
+        
+        <hr>
+        <label>Blade Flare (Top Radius) <span id="fV" class="val-disp">0.8</span></label>
+        <input type="range" id="flare" min="0.3" max="2.0" step="0.1" value="0.8">
+    </div>
+</div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // --- Technical Architecture ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    camera.position.set(6, 4, 8);
+
+    // --- Illumination (The "Anti-Dark" Protocol) ---
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
+    scene.add(hemiLight);
+
+    const pointLight = new THREE.PointLight(0x00ffcc, 100);
+    scene.add(pointLight); // This will follow the camera in the loop
+
+    // --- Turbine Logic ---
+    const turbine = new THREE.Group();
+    scene.add(turbine);
+
+    // High-visibility material
+    const bladeMat = new THREE.MeshStandardMaterial({ 
+        color: 0x00ffcc, 
+        metalness: 0.9, 
+        roughness: 0.1, 
+        side: THREE.DoubleSide,
+        emissive: 0x002222
+    });
+
+    const shaftMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0 });
+
+    function rebuildGeometry() {
+        while(turbine.children.length > 0) turbine.remove(turbine.children[0]);
+        const flare = parseFloat(document.getElementById('flare').value);
+        
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 6, 16), shaftMat);
+        turbine.add(shaft);
+
+        for(let i=0; i<3; i++) {
+            const geo = new THREE.CylinderGeometry(flare, 0.8, 4, 32, 32, true, 0, Math.PI);
+            const pos = geo.attributes.position;
+            for(let j=0; j<pos.count; j++) {
+                let y = pos.getY(j);
+                const twist = (y/4) * 2.0; 
+                let x = pos.getX(j), z = pos.getZ(j);
+                pos.setXYZ(j, x*Math.cos(twist)-z*Math.sin(twist), y, x*Math.sin(twist)+z*Math.cos(twist));
+            }
+            geo.computeVertexNormals();
+            const blade = new THREE.Mesh(geo, bladeMat);
+            const pivot = new THREE.Group();
+            blade.position.x = 0.5;
+            pivot.add(blade);
+            pivot.rotation.y = (i * Math.PI * 2) / 3;
+            turbine.add(pivot);
+        }
+    }
+
+    // --- Wind Vector Visualization ---
+    const pCount = 1500;
+    const pGeo = new THREE.BufferGeometry();
+    const pPos = new Float32Array(pCount * 3);
+    for(let i=0; i<pCount*3; i++) pPos[i] = (Math.random()-0.5)*20;
+    pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+    const windPoints = new THREE.Points(pGeo, new THREE.PointsMaterial({color: 0xffffff, size: 0.03, transparent: true, opacity: 0.4}));
+    scene.add(windPoints);
+
+    // --- Physics State ---
+    let angularVelocity = 0;
+    const windVec = new THREE.Vector3();
+
+    function animate() {
+        requestAnimationFrame(animate);
+        rebuildGeometry();
+        
+        // Sync light to camera so blades are always lit
+        pointLight.position.copy(camera.position);
+
+        // Input Handling
+        const speed = parseFloat(document.getElementById('speed').value);
+        const flare = parseFloat(document.getElementById('flare').value);
+        windVec.set(
+            parseFloat(document.getElementById('windX').value),
+            parseFloat(document.getElementById('windY').value),
+            parseFloat(document.getElementById('windZ').value)
+        ).normalize();
+
+        // Update UI
+        document.getElementById('sV').innerText = speed;
+        document.getElementById('fV').innerText = flare;
+
+        // PHYSICS CALCULATION
+        // Only horizontal wind (X, Z) creates torque on a vertical axis
+        const horizontalComponent = new THREE.Vector2(windVec.x, windVec.z).length();
+        const effectiveWind = horizontalComponent * speed;
+        document.getElementById('effWind').innerText = effectiveWind.toFixed(1) + " m/s";
+
+        // Torque is a function of effective wind and blade area (flare)
+        const torque = effectiveWind * (flare + 0.8) * 0.0005;
+        const friction = angularVelocity * 0.04;
+        angularVelocity += (torque - friction);
+        if(angularVelocity < 0) angularVelocity = 0;
+
+        turbine.rotation.y += angularVelocity;
+
+        // OUTPUT (Strictly based on Rotation)
+        const rpm = (angularVelocity * 60) / (0.016 * 2 * Math.PI); 
+        const watts = Math.pow(angularVelocity * 150, 1.6) * 0.1;
+
+        document.getElementById('rpmVal').innerText = Math.floor(rpm);
+        document.getElementById('wattVal').innerText = watts.toFixed(2);
+
+        // Particle Flow
+        const p = windPoints.geometry.attributes.position.array;
+        for(let i=0; i<pCount; i++) {
+            p[i*3] += windVec.x * speed * 0.02;
+            p[i*3+1] += windVec.y * speed * 0.02;
+            p[i*3+2] += windVec.z * speed * 0.02;
+            
+            if(Math.abs(p[i*3]) > 10 || Math.abs(p[i*3+1]) > 10 || Math.abs(p[i*3+2]) > 10) {
+                p[i*3] = (Math.random()-0.5)*20 - (windVec.x * 10);
+                p[i*3+1] = (Math.random()-0.5)*20 - (windVec.y * 10);
+                p[i*3+2] = (Math.random()-0.5)*20 - (windVec.z * 10);
+            }
+        }
+        windPoints.geometry.attributes.position.needsUpdate = true;
+
+        controls.update();
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    window.onresize = () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+</script>
+</body>
+</html>
