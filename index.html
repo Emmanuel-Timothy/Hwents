@@ -2,56 +2,65 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Savonius Master Simulation - Timothy's Edition</title>
+    <title>Omni-Directional Rotor Lab - Beacon Edition</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #0a0e14; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #00ffcc; }
-        #interface {
+        :root { --neon: #00ffcc; --bg: #020406; }
+        body { margin: 0; overflow: hidden; background: var(--bg); font-family: 'Segoe UI', sans-serif; color: white; }
+        
+        #ui-layer {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none; padding: 20px; box-sizing: border-box;
-            display: flex; justify-content: space-between;
+            pointer-events: none; padding: 25px; display: flex; flex-direction: column;
+            justify-content: space-between; box-sizing: border-box;
         }
-        .panel {
-            background: rgba(10, 20, 30, 0.85); border: 1px solid #00ffcc;
-            padding: 20px; pointer-events: auto; width: 280px; height: fit-content;
-            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+
+        .glass-panel {
+            background: rgba(5, 12, 20, 0.9);
+            border-left: 3px solid var(--neon);
+            padding: 20px; pointer-events: auto; width: 300px;
+            backdrop-filter: blur(10px); box-shadow: 0 20px 40px rgba(0,0,0,0.9);
         }
-        .metric { font-family: 'Courier New', monospace; font-size: 1.5em; color: #fff; text-shadow: 0 0 5px #00ffcc; }
-        label { display: block; font-size: 0.75em; margin-top: 10px; color: #88a; text-transform: uppercase; }
-        input[type=range] { width: 100%; accent-color: #00ffcc; cursor: crosshair; }
-        .val-disp { float: right; color: #00ffcc; }
-        hr { border: 0; border-top: 1px solid #224444; margin: 15px 0; }
+
+        .title { color: var(--neon); font-weight: 800; letter-spacing: 1.5px; margin-bottom: 15px; font-size: 0.85em; }
+        .control-group { margin-bottom: 12px; }
+        label { display: block; font-size: 0.65em; opacity: 0.5; margin-bottom: 5px; text-transform: uppercase; }
+        
+        input[type=range] { width: 100%; accent-color: var(--neon); cursor: pointer; }
+        .val-disp { float: right; color: var(--neon); font-family: monospace; }
+        .readout { font-family: 'Courier New', monospace; font-size: 1.6em; color: var(--neon); }
+        .unit { font-size: 0.5em; opacity: 0.5; margin-left: 4px; }
     </style>
 </head>
 <body>
 
-<div id="interface">
-    <div class="panel">
-        <div style="font-weight: bold; border-bottom: 1px solid #00ffcc; margin-bottom: 10px;">TELEMETRY</div>
-        <label>Shaft Velocity</label>
-        <div class="metric"><span id="rpmVal">0</span> RPM</div>
-        <label>Generator Output</label>
-        <div class="metric"><span id="wattVal">0.00</span> W</div>
-        <hr>
-        <label>Effective Wind (Horizontal)</label>
-        <div id="effWind">0.0 m/s</div>
+<div id="ui-layer">
+    <div class="glass-panel">
+        <div class="title">ENVIRONMENTAL FORCES</div>
+        
+        <div class="control-group">
+            <label>Wind Speed <span id="sVal" class="val-disp">20</span></label>
+            <input type="range" id="speed" min="0" max="100" value="20">
+        </div>
+
+        <div class="control-group">
+            <label>Horizontal Yaw <span id="yVal" class="val-disp">0°</span></label>
+            <input type="range" id="yaw" min="0" max="360" value="0">
+        </div>
+
+        <div class="control-group">
+            <label>Vertical Pitch <span id="pVal" class="val-disp">0°</span></label>
+            <input type="range" id="pitch" min="-90" max="90" value="0">
+        </div>
+
+        <hr style="opacity:0.1; margin: 15px 0;">
+        
+        <label>Blade Count <span id="bVal" class="val-disp">3</span></label>
+        <input type="range" id="bladeCount" min="2" max="12" step="1" value="3">
     </div>
 
-    <div class="panel">
-        <div style="font-weight: bold; border-bottom: 1px solid #00ffcc; margin-bottom: 10px;">ENVIRONMENT & DESIGN</div>
-        
-        <label>Wind Speed <span id="sV" class="val-disp">12</span></label>
-        <input type="range" id="speed" min="0" max="60" value="12">
-        
-        <label>Wind Direction X (East/West)</label>
-        <input type="range" id="windX" min="-1" max="1" step="0.1" value="0">
-        <label>Wind Direction Y (Up/Down)</label>
-        <input type="range" id="windY" min="-1" max="1" step="0.1" value="0">
-        <label>Wind Direction Z (North/South)</label>
-        <input type="range" id="windZ" min="-1" max="1" step="0.1" value="1">
-        
-        <hr>
-        <label>Blade Flare (Top Radius) <span id="fV" class="val-disp">0.8</span></label>
-        <input type="range" id="flare" min="0.3" max="2.0" step="0.1" value="0.8">
+    <div class="glass-panel">
+        <div class="title">SHAFT DYNAMICS</div>
+        <div class="readout" id="rpmDisp">0<span class="unit">RPM</span></div>
+        <div class="readout" id="pwrDisp">0.00<span class="unit">kW</span></div>
     </div>
 </div>
 
@@ -68,143 +77,128 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-    // --- Technical Architecture ---
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    camera.position.set(6, 4, 8);
+    camera.position.set(10, 8, 18);
 
-    // --- Illumination (The "Anti-Dark" Protocol) ---
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
-    scene.add(hemiLight);
+    // Aesthetics
+    scene.add(new THREE.AmbientLight(0xffffff, 0.1)); // Dimmer ambient for higher lamp contrast
+    
+    // --- The Hub Beacon ---
+    const beaconLight = new THREE.PointLight(0x00ffcc, 100, 50);
+    scene.add(beaconLight);
 
-    const pointLight = new THREE.PointLight(0x00ffcc, 100);
-    scene.add(pointLight); // This will follow the camera in the loop
+    const beaconCoreGeo = new THREE.SphereGeometry(0.4, 32, 32);
+    const beaconMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
+    const beaconMesh = new THREE.Mesh(beaconCoreGeo, beaconMat);
+    scene.add(beaconMesh); // Stays at center front
 
-    // --- Turbine Logic ---
-    const turbine = new THREE.Group();
-    scene.add(turbine);
+    let rotorGroup = new THREE.Group();
+    scene.add(rotorGroup);
 
-    // High-visibility material
-    const bladeMat = new THREE.MeshStandardMaterial({ 
-        color: 0x00ffcc, 
-        metalness: 0.9, 
-        roughness: 0.1, 
-        side: THREE.DoubleSide,
-        emissive: 0x002222
-    });
-
-    const shaftMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0 });
-
-    function rebuildGeometry() {
-        while(turbine.children.length > 0) turbine.remove(turbine.children[0]);
-        const flare = parseFloat(document.getElementById('flare').value);
+    function buildRotor() {
+        while(rotorGroup.children.length > 0) rotorGroup.remove(rotorGroup.children[0]);
+        const count = parseInt(document.getElementById('bladeCount').value);
+        const radius = 8;
         
-        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 6, 16), shaftMat);
-        turbine.add(shaft);
+        // Dark metallic hub
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.2, 32), new THREE.MeshStandardMaterial({color: 0x080808, metalness: 1}));
+        hub.rotation.x = Math.PI / 2;
+        rotorGroup.add(hub);
 
-        for(let i=0; i<3; i++) {
-            const geo = new THREE.CylinderGeometry(flare, 0.8, 4, 32, 32, true, 0, Math.PI);
-            const pos = geo.attributes.position;
+        for(let i=0; i<count; i++) {
+            const bGeo = new THREE.BoxGeometry(0.6, radius, 0.08, 1, 20, 1);
+            const pos = bGeo.attributes.position;
             for(let j=0; j<pos.count; j++) {
-                let y = pos.getY(j);
-                const twist = (y/4) * 2.0; 
-                let x = pos.getX(j), z = pos.getZ(j);
-                pos.setXYZ(j, x*Math.cos(twist)-z*Math.sin(twist), y, x*Math.sin(twist)+z*Math.cos(twist));
+                let y = pos.getY(j) + (radius/2);
+                let x = pos.getX(j);
+                let z = pos.getZ(j);
+                const t = (y/radius);
+                const twist = t * 0.7;
+                const taper = 1.0 - t * 0.85;
+                pos.setXYZ(j, x * taper * Math.cos(twist) - z * Math.sin(twist), y, x * taper * Math.sin(twist) + z * Math.cos(twist));
             }
-            geo.computeVertexNormals();
-            const blade = new THREE.Mesh(geo, bladeMat);
+            bGeo.computeVertexNormals();
+            const blade = new THREE.Mesh(bGeo, new THREE.MeshStandardMaterial({color: 0xeeeeee, metalness: 0.9, roughness: 0.1, side: 2}));
             const pivot = new THREE.Group();
-            blade.position.x = 0.5;
+            pivot.rotation.z = (i * Math.PI * 2) / count;
             pivot.add(blade);
-            pivot.rotation.y = (i * Math.PI * 2) / 3;
-            turbine.add(pivot);
+            rotorGroup.add(pivot);
         }
     }
 
-    // --- Wind Vector Visualization ---
-    const pCount = 1500;
+    const pCount = 2000;
     const pGeo = new THREE.BufferGeometry();
     const pPos = new Float32Array(pCount * 3);
-    for(let i=0; i<pCount*3; i++) pPos[i] = (Math.random()-0.5)*20;
+    for(let i=0; i<pCount*3; i++) pPos[i] = (Math.random()-0.5)*60;
     pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
-    const windPoints = new THREE.Points(pGeo, new THREE.PointsMaterial({color: 0xffffff, size: 0.03, transparent: true, opacity: 0.4}));
-    scene.add(windPoints);
+    const windSys = new THREE.Points(pGeo, new THREE.PointsMaterial({color: 0x00ffcc, size: 0.08, transparent: true, opacity: 0.2}));
+    scene.add(windSys);
 
-    // --- Physics State ---
-    let angularVelocity = 0;
+    let angVel = 0;
     const windVec = new THREE.Vector3();
 
     function animate() {
         requestAnimationFrame(animate);
-        rebuildGeometry();
-        
-        // Sync light to camera so blades are always lit
-        pointLight.position.copy(camera.position);
+        buildRotor();
 
-        // Input Handling
         const speed = parseFloat(document.getElementById('speed').value);
-        const flare = parseFloat(document.getElementById('flare').value);
-        windVec.set(
-            parseFloat(document.getElementById('windX').value),
-            parseFloat(document.getElementById('windY').value),
-            parseFloat(document.getElementById('windZ').value)
-        ).normalize();
+        const yaw = THREE.MathUtils.degToRad(parseFloat(document.getElementById('yaw').value));
+        const pitch = THREE.MathUtils.degToRad(parseFloat(document.getElementById('pitch').value));
+        const count = parseInt(document.getElementById('bladeCount').value);
 
-        // Update UI
-        document.getElementById('sV').innerText = speed;
-        document.getElementById('fV').innerText = flare;
+        document.getElementById('sVal').innerText = speed;
+        document.getElementById('yVal').innerText = document.getElementById('yaw').value + "°";
+        document.getElementById('pVal').innerText = document.getElementById('pitch').value + "°";
+        document.getElementById('bVal').innerText = count;
 
-        // PHYSICS CALCULATION
-        // Only horizontal wind (X, Z) creates torque on a vertical axis
-        const horizontalComponent = new THREE.Vector2(windVec.x, windVec.z).length();
-        const effectiveWind = horizontalComponent * speed;
-        document.getElementById('effWind').innerText = effectiveWind.toFixed(1) + " m/s";
+        windVec.set(Math.sin(yaw)*Math.cos(pitch), Math.sin(pitch), Math.cos(yaw)*Math.cos(pitch)).normalize();
 
-        // Torque is a function of effective wind and blade area (flare)
-        const torque = effectiveWind * (flare + 0.8) * 0.0005;
-        const friction = angularVelocity * 0.04;
-        angularVelocity += (torque - friction);
-        if(angularVelocity < 0) angularVelocity = 0;
+        const dot = windVec.dot(new THREE.Vector3(0, 0, 1));
+        const torque = speed * 0.00015 * dot;
+        const drag = angVel * (0.02 + count * 0.003);
+        
+        angVel += (torque - drag);
+        rotorGroup.rotation.z -= angVel;
 
-        turbine.rotation.y += angularVelocity;
+        const rpm = (angVel * 60) / (0.016 * 2 * Math.PI);
+        const power = Math.abs(0.5 * 1.225 * Math.PI * 64 * Math.pow(speed, 3) * 0.35 * dot) / 1000;
+        
+        document.getElementById('rpmDisp').innerHTML = `${Math.floor(rpm)}<span class="unit">RPM</span>`;
+        document.getElementById('pwrDisp').innerHTML = `${power.toFixed(2)}<span class="unit">kW</span>`;
 
-        // OUTPUT (Strictly based on Rotation)
-        const rpm = (angularVelocity * 60) / (0.016 * 2 * Math.PI); 
-        const watts = Math.pow(angularVelocity * 150, 1.6) * 0.1;
+        // --- Update Lamp Intensity based on Power/RPM ---
+        const pulse = 1.0 + Math.sin(Date.now() * 0.005) * 0.2; // Slight hum
+        beaconLight.intensity = Math.min(rpm * 2, 500) * pulse;
+        beaconMesh.scale.setScalar(1 + (rpm / 500) * pulse);
+        beaconMat.color.setHSL(0.5, 1, 0.5 + (rpm / 1000)); // Gets brighter/whiter at high speed
+        
+        // Reposition beacon slightly in front of hub
+        beaconMesh.position.set(0,0,1.2);
+        beaconLight.position.set(0,0,1.5);
 
-        document.getElementById('rpmVal').innerText = Math.floor(rpm);
-        document.getElementById('wattVal').innerText = watts.toFixed(2);
-
-        // Particle Flow
-        const p = windPoints.geometry.attributes.position.array;
+        const p = windSys.geometry.attributes.position.array;
         for(let i=0; i<pCount; i++) {
-            p[i*3] += windVec.x * speed * 0.02;
-            p[i*3+1] += windVec.y * speed * 0.02;
-            p[i*3+2] += windVec.z * speed * 0.02;
-            
-            if(Math.abs(p[i*3]) > 10 || Math.abs(p[i*3+1]) > 10 || Math.abs(p[i*3+2]) > 10) {
-                p[i*3] = (Math.random()-0.5)*20 - (windVec.x * 10);
-                p[i*3+1] = (Math.random()-0.5)*20 - (windVec.y * 10);
-                p[i*3+2] = (Math.random()-0.5)*20 - (windVec.z * 10);
+            p[i*3] += windVec.x * speed * 0.05;
+            p[i*3+1] += windVec.y * speed * 0.05;
+            p[i*3+2] += windVec.z * speed * 0.05;
+            if(Math.abs(p[i*3]) > 30 || Math.abs(p[i*3+1]) > 30 || Math.abs(p[i*3+2]) > 30) {
+                p[i*3] = (Math.random()-0.5)*60 - (windVec.x * 25);
+                p[i*3+1] = (Math.random()-0.5)*20 - (windVec.y * 25);
+                p[i*3+2] = (Math.random()-0.5)*60 - (windVec.z * 25);
             }
         }
-        windPoints.geometry.attributes.position.needsUpdate = true;
+        windSys.geometry.attributes.position.needsUpdate = true;
 
         controls.update();
         renderer.render(scene, camera);
     }
     animate();
-
-    window.onresize = () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    };
 </script>
 </body>
 </html>
