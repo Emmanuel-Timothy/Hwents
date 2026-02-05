@@ -65,9 +65,7 @@
 
         <div class="glass-panel">
             <div class="title">DYNAMIC CALCULATIONS</div>
-            <div id="math-hud">
-                Calculating vectors...
-            </div>
+            <div id="math-hud">Calculating vectors...</div>
         </div>
     </div>
 
@@ -91,7 +89,7 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-    // Scene Setup
+    // Standard scene initialization
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -101,36 +99,48 @@
     const controls = new OrbitControls(camera, renderer.domElement);
     camera.position.set(10, 8, 18);
 
-    // Lighting
+    // Global illumination
     scene.add(new THREE.AmbientLight(0xffffff, 0.4));
     const dLight = new THREE.DirectionalLight(0xffffff, 0.8);
     dLight.position.set(5, 10, 7);
     scene.add(dLight);
     
-    // The Hub Beacon
-    const beaconLight = new THREE.PointLight(0x00ffcc, 100, 50);
+    // --- THE FIXED BEACON (LAMP) ---
+    // PointLight with physically correct decay (distance=15, decay=2)
+    const beaconLight = new THREE.PointLight(0x00ffcc, 0, 15, 2);
     scene.add(beaconLight);
+
     const beaconMesh = new THREE.Mesh(
         new THREE.SphereGeometry(0.4, 32, 32), 
-        new THREE.MeshBasicMaterial({ color: 0x00ffcc })
+        new THREE.MeshStandardMaterial({ 
+            color: 0x002211, 
+            emissive: 0x00ffcc, 
+            emissiveIntensity: 0 
+        })
     );
+    beaconMesh.position.z = 1.1; // Place it just in front of the hub
     scene.add(beaconMesh);
 
+    // Rotor group will hold the blades and hub
     let rotorGroup = new THREE.Group();
     scene.add(rotorGroup);
 
-    // Physics State
+    // Physics State Variables
     let angVel = 0;
     const rho = 1.225; // Air density kg/m^3
     const windVec = new THREE.Vector3();
 
+    /**
+     * Reconstructs the rotor geometry based on UI sliders
+     */
     function buildRotor() {
-        // Only rebuild if parameters changed to save CPU cycles
         while(rotorGroup.children.length > 0) rotorGroup.remove(rotorGroup.children[0]);
+        
         const count = parseInt(document.getElementById('bladeCount').value);
         const twistFactor = parseFloat(document.getElementById('twist').value);
         const radius = 8;
         
+        // Central hub geometry
         const hub = new THREE.Mesh(
             new THREE.CylinderGeometry(0.7, 0.7, 1.2, 32), 
             new THREE.MeshStandardMaterial({color: 0x111111, metalness: 1, roughness: 0.1})
@@ -138,9 +148,11 @@
         hub.rotation.x = Math.PI / 2;
         rotorGroup.add(hub);
 
+        // Procedural blade generation with helical twist
         for(let i=0; i<count; i++) {
             const bGeo = new THREE.BoxGeometry(0.6, radius, 0.08, 1, 30, 1);
             const pos = bGeo.attributes.position;
+            
             for(let j=0; j<pos.count; j++) {
                 let y = pos.getY(j) + (radius/2);
                 let x = pos.getX(j);
@@ -148,7 +160,13 @@
                 const t = (y/radius);
                 const twist = t * twistFactor;
                 const taper = 1.0 - t * 0.85;
-                pos.setXYZ(j, x * taper * Math.cos(twist) - z * Math.sin(twist), y, x * taper * Math.sin(twist) + z * Math.cos(twist));
+                
+                // Matrix-like rotation transformation for the twist
+                pos.setXYZ(j, 
+                    x * taper * Math.cos(twist) - z * Math.sin(twist), 
+                    y, 
+                    x * taper * Math.sin(twist) + z * Math.cos(twist)
+                );
             }
             bGeo.computeVertexNormals();
             const blade = new THREE.Mesh(bGeo, new THREE.MeshStandardMaterial({color: 0xeeeeee, metalness: 0.9, roughness: 0.1, side: 2}));
@@ -159,7 +177,7 @@
         }
     }
 
-    // Background Particle System
+    // Environmental Particle System (Wind visualization)
     const pCount = 2000;
     const pGeo = new THREE.BufferGeometry();
     const pPos = new Float32Array(pCount * 3);
@@ -168,57 +186,59 @@
     const windSys = new THREE.Points(pGeo, new THREE.PointsMaterial({color: 0x00ffcc, size: 0.08, transparent: true, opacity: 0.2}));
     scene.add(windSys);
 
-    // Initial Build
+    // Initial construction
     buildRotor();
 
-    // Event listeners to rebuild only when needed
+    // Re-bind listeners
     document.getElementById('bladeCount').addEventListener('input', buildRotor);
     document.getElementById('twist').addEventListener('input', buildRotor);
 
     function animate() {
         requestAnimationFrame(animate);
 
+        // Retrieve current UI state
         const speed = parseFloat(document.getElementById('speed').value);
         const yaw = THREE.MathUtils.degToRad(parseFloat(document.getElementById('yaw').value));
         const pitch = THREE.MathUtils.degToRad(parseFloat(document.getElementById('pitch').value));
         const count = parseInt(document.getElementById('bladeCount').value);
         const twistFactor = parseFloat(document.getElementById('twist').value);
 
-        // Update UI Text
+        // Update UI displays
         document.getElementById('sVal').innerText = speed;
         document.getElementById('yVal').innerText = document.getElementById('yaw').value + "°";
         document.getElementById('pVal').innerText = document.getElementById('pitch').value + "°";
         document.getElementById('bVal').innerText = count;
         document.getElementById('tVal').innerText = twistFactor;
 
-        // Calculate Wind Vector
+        // Vector Calculation: Direction of incoming wind
         windVec.set(Math.sin(yaw)*Math.cos(pitch), Math.sin(pitch), Math.cos(yaw)*Math.cos(pitch)).normalize();
 
         // --- ENHANCED PHYSICS ENGINE ---
-        const alignment = Math.max(0, windVec.dot(new THREE.Vector3(0, 0, 1))); // Dot product for face-on wind
-        const twistEff = Math.max(0, 1.0 - Math.abs(twistFactor - 0.7) * 0.5); // Efficiency curve
+        // Dot product determines how much wind actually hits the rotor face
+        const alignment = Math.max(0, windVec.dot(new THREE.Vector3(0, 0, 1))); 
+        const twistEff = Math.max(0, 1.0 - Math.abs(twistFactor - 0.7) * 0.5); 
         const sweptArea = Math.PI * Math.pow(8, 2);
 
-        // 1. Wind Torque: τ = 1/2 * ρ * v^2 * A * Cp (Simplified)
+        // 1. Wind Torque Calculation
         const torqueWind = 0.5 * rho * Math.pow(speed * 0.1, 2) * sweptArea * alignment * twistEff * 0.005;
 
-        // 2. Drag & Load Torque: τ_drag = ω * b + ω^2 * c
+        // 2. Drag/Friction Torque
         const dragCoeff = 0.02 + (count * 0.005);
         const torqueLoad = (angVel * dragCoeff) + (Math.pow(angVel, 2) * 0.01);
 
-        // 3. Angular Acceleration: α = (τ_wind - τ_load) / Inertia
+        // 3. Angular Momentum Update
         const netTorque = torqueWind - torqueLoad;
         angVel += netTorque;
         if (angVel < 0) angVel = 0;
 
-        // Rotate Rotor
+        // Apply rotation to the 3D model
         rotorGroup.rotation.z -= angVel;
 
-        // 4. Power Output based on RPM: P = τ_load * ω
+        // 4. Power Output Metrics
         const powerWatts = torqueLoad * angVel * 1000;
-        const rpm = (angVel * 60) / (0.016 * 2 * Math.PI); // Relative to frame time
+        const rpm = (angVel * 60) / (0.016 * 2 * Math.PI); 
 
-        // Update Displays
+        // Update DOM Readouts
         document.getElementById('rpmDisp').innerHTML = `${Math.floor(rpm)}<span class="unit">RPM</span>`;
         document.getElementById('pwrDisp').innerHTML = `${(powerWatts / 1000).toFixed(2)}<span class="unit">kW</span>`;
 
@@ -232,18 +252,25 @@
             <div style="color:var(--neon)">P = ${(powerWatts).toFixed(1)} Watts</div>
         `;
 
-        // Aesthetics: Beacon & Wind
+        // --- AESTHETICS: THE FIX ---
         const pulse = 1.0 + Math.sin(Date.now() * 0.005) * 0.2;
-        beaconLight.intensity = Math.min(rpm * 5, 800) * pulse;
-        beaconMesh.scale.setScalar(1 + (rpm / 800) * pulse);
-        beaconMesh.position.set(0,0,1.2);
-        beaconLight.position.set(0,0,1.5);
+        const normalizedRPM = Math.min(rpm / 600, 1.0); // Normalize for visual scaling
 
+        // Update Beacon Light & Mesh Emissivity
+        beaconLight.intensity = 60 * normalizedRPM * pulse;
+        beaconLight.position.copy(beaconMesh.position);
+        
+        beaconMesh.material.emissiveIntensity = 4 * normalizedRPM * pulse;
+        beaconMesh.scale.setScalar(1 + (normalizedRPM * 0.4) * pulse);
+
+        // Update Wind Particle Positions
         const p = windSys.geometry.attributes.position.array;
         for(let i=0; i<pCount; i++) {
             p[i*3] += windVec.x * speed * 0.05;
             p[i*3+1] += windVec.y * speed * 0.05;
             p[i*3+2] += windVec.z * speed * 0.05;
+            
+            // Teleport particles back to start once they exit the bounds
             if(Math.abs(p[i*3]) > 30 || Math.abs(p[i*3+1]) > 30 || Math.abs(p[i*3+2]) > 30) {
                 p[i*3] = (Math.random()-0.5)*60 - (windVec.x * 25);
                 p[i*3+1] = (Math.random()-0.5)*20 - (windVec.y * 25);
@@ -257,6 +284,7 @@
     }
     animate();
 
+    // Handle viewport changes
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
