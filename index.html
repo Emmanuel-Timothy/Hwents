@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Omni-Directional Rotor Lab - Beacon Edition</title>
+    <title>Omni-Directional Rotor Lab - Twist & Beacon Edition</title>
     <style>
-        :root { --neon: #00ffcc; --bg: #020406; }
+        :root { --neon: #00ffcc; --bg: #0a0e14; } /* Slightly brighter background */
         body { margin: 0; overflow: hidden; background: var(--bg); font-family: 'Segoe UI', sans-serif; color: white; }
         
         #ui-layer {
@@ -14,7 +14,7 @@
         }
 
         .glass-panel {
-            background: rgba(5, 12, 20, 0.9);
+            background: rgba(15, 25, 35, 0.9); /* Brighter panel */
             border-left: 3px solid var(--neon);
             padding: 20px; pointer-events: auto; width: 300px;
             backdrop-filter: blur(10px); box-shadow: 0 20px 40px rgba(0,0,0,0.9);
@@ -53,8 +53,15 @@
 
         <hr style="opacity:0.1; margin: 15px 0;">
         
-        <label>Blade Count <span id="bVal" class="val-disp">3</span></label>
-        <input type="range" id="bladeCount" min="2" max="12" step="1" value="3">
+        <div class="control-group">
+            <label>Blade Count <span id="bVal" class="val-disp">3</span></label>
+            <input type="range" id="bladeCount" min="2" max="12" step="1" value="3">
+        </div>
+
+        <div class="control-group">
+            <label>Helical Twist <span id="tVal" class="val-disp">0.7</span></label>
+            <input type="range" id="twist" min="0" max="2.5" step="0.05" value="0.7">
+        </div>
     </div>
 
     <div class="glass-panel">
@@ -86,8 +93,11 @@
     const controls = new OrbitControls(camera, renderer.domElement);
     camera.position.set(10, 8, 18);
 
-    // Aesthetics
-    scene.add(new THREE.AmbientLight(0xffffff, 0.1)); // Dimmer ambient for higher lamp contrast
+    // --- Brighter Aesthetics ---
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4)); // Increased from 0.1
+    const dLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dLight.position.set(5, 10, 7);
+    scene.add(dLight);
     
     // --- The Hub Beacon ---
     const beaconLight = new THREE.PointLight(0x00ffcc, 100, 50);
@@ -96,7 +106,7 @@
     const beaconCoreGeo = new THREE.SphereGeometry(0.4, 32, 32);
     const beaconMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
     const beaconMesh = new THREE.Mesh(beaconCoreGeo, beaconMat);
-    scene.add(beaconMesh); // Stays at center front
+    scene.add(beaconMesh);
 
     let rotorGroup = new THREE.Group();
     scene.add(rotorGroup);
@@ -104,23 +114,26 @@
     function buildRotor() {
         while(rotorGroup.children.length > 0) rotorGroup.remove(rotorGroup.children[0]);
         const count = parseInt(document.getElementById('bladeCount').value);
+        const twistFactor = parseFloat(document.getElementById('twist').value);
         const radius = 8;
         
-        // Dark metallic hub
-        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.2, 32), new THREE.MeshStandardMaterial({color: 0x080808, metalness: 1}));
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.2, 32), new THREE.MeshStandardMaterial({color: 0x111111, metalness: 1, roughness: 0.1}));
         hub.rotation.x = Math.PI / 2;
         rotorGroup.add(hub);
 
         for(let i=0; i<count; i++) {
-            const bGeo = new THREE.BoxGeometry(0.6, radius, 0.08, 1, 20, 1);
+            const bGeo = new THREE.BoxGeometry(0.6, radius, 0.08, 1, 30, 1);
             const pos = bGeo.attributes.position;
             for(let j=0; j<pos.count; j++) {
                 let y = pos.getY(j) + (radius/2);
                 let x = pos.getX(j);
                 let z = pos.getZ(j);
                 const t = (y/radius);
-                const twist = t * 0.7;
+                
+                // Helical Twist Application
+                const twist = t * twistFactor;
                 const taper = 1.0 - t * 0.85;
+                
                 pos.setXYZ(j, x * taper * Math.cos(twist) - z * Math.sin(twist), y, x * taper * Math.sin(twist) + z * Math.cos(twist));
             }
             bGeo.computeVertexNormals();
@@ -151,34 +164,35 @@
         const yaw = THREE.MathUtils.degToRad(parseFloat(document.getElementById('yaw').value));
         const pitch = THREE.MathUtils.degToRad(parseFloat(document.getElementById('pitch').value));
         const count = parseInt(document.getElementById('bladeCount').value);
+        const twistFactor = parseFloat(document.getElementById('twist').value);
 
         document.getElementById('sVal').innerText = speed;
         document.getElementById('yVal').innerText = document.getElementById('yaw').value + "°";
         document.getElementById('pVal').innerText = document.getElementById('pitch').value + "°";
         document.getElementById('bVal').innerText = count;
+        document.getElementById('tVal').innerText = twistFactor;
 
         windVec.set(Math.sin(yaw)*Math.cos(pitch), Math.sin(pitch), Math.cos(yaw)*Math.cos(pitch)).normalize();
 
+        // Physics: Torque depends on alignment (Dot Product) and Twist Efficiency
         const dot = windVec.dot(new THREE.Vector3(0, 0, 1));
-        const torque = speed * 0.00015 * dot;
+        const twistEfficiency = Math.max(0, 1.0 - Math.abs(twistFactor - 0.7) * 0.5);
+        const torque = speed * 0.00015 * dot * twistEfficiency;
         const drag = angVel * (0.02 + count * 0.003);
         
         angVel += (torque - drag);
         rotorGroup.rotation.z -= angVel;
 
         const rpm = (angVel * 60) / (0.016 * 2 * Math.PI);
-        const power = Math.abs(0.5 * 1.225 * Math.PI * 64 * Math.pow(speed, 3) * 0.35 * dot) / 1000;
+        const power = Math.abs(0.5 * 1.225 * Math.PI * 64 * Math.pow(speed, 3) * 0.35 * dot * twistEfficiency) / 1000;
         
         document.getElementById('rpmDisp').innerHTML = `${Math.floor(rpm)}<span class="unit">RPM</span>`;
         document.getElementById('pwrDisp').innerHTML = `${power.toFixed(2)}<span class="unit">kW</span>`;
 
-        // --- Update Lamp Intensity based on Power/RPM ---
-        const pulse = 1.0 + Math.sin(Date.now() * 0.005) * 0.2; // Slight hum
+        const pulse = 1.0 + Math.sin(Date.now() * 0.005) * 0.2;
         beaconLight.intensity = Math.min(rpm * 2, 500) * pulse;
         beaconMesh.scale.setScalar(1 + (rpm / 500) * pulse);
-        beaconMat.color.setHSL(0.5, 1, 0.5 + (rpm / 1000)); // Gets brighter/whiter at high speed
         
-        // Reposition beacon slightly in front of hub
         beaconMesh.position.set(0,0,1.2);
         beaconLight.position.set(0,0,1.5);
 
