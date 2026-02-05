@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Omni-Directional Rotor Lab - Twist & Beacon Edition</title>
+    <title>Omni-Directional Rotor Lab - Physics Edition</title>
     <style>
-        :root { --neon: #00ffcc; --bg: #0a0e14; } /* Slightly brighter background */
+        :root { --neon: #00ffcc; --bg: #0a0e14; --gold: #ffaa00; }
         body { margin: 0; overflow: hidden; background: var(--bg); font-family: 'Segoe UI', sans-serif; color: white; }
         
         #ui-layer {
@@ -14,10 +14,11 @@
         }
 
         .glass-panel {
-            background: rgba(15, 25, 35, 0.9); /* Brighter panel */
+            background: rgba(15, 25, 35, 0.9);
             border-left: 3px solid var(--neon);
-            padding: 20px; pointer-events: auto; width: 300px;
+            padding: 20px; pointer-events: auto; width: 320px;
             backdrop-filter: blur(10px); box-shadow: 0 20px 40px rgba(0,0,0,0.9);
+            margin-bottom: 10px;
         }
 
         .title { color: var(--neon); font-weight: 800; letter-spacing: 1.5px; margin-bottom: 15px; font-size: 0.85em; }
@@ -28,39 +29,45 @@
         .val-disp { float: right; color: var(--neon); font-family: monospace; }
         .readout { font-family: 'Courier New', monospace; font-size: 1.6em; color: var(--neon); }
         .unit { font-size: 0.5em; opacity: 0.5; margin-left: 4px; }
+
+        #math-hud { font-family: monospace; font-size: 0.75em; color: #ccc; line-height: 1.4; }
+        .formula-line { color: var(--gold); }
     </style>
 </head>
 <body>
 
 <div id="ui-layer">
-    <div class="glass-panel">
-        <div class="title">ENVIRONMENTAL FORCES</div>
-        
-        <div class="control-group">
-            <label>Wind Speed <span id="sVal" class="val-disp">20</span></label>
-            <input type="range" id="speed" min="0" max="100" value="20">
+    <div>
+        <div class="glass-panel">
+            <div class="title">ENVIRONMENTAL FORCES</div>
+            <div class="control-group">
+                <label>Wind Speed <span id="sVal" class="val-disp">20</span></label>
+                <input type="range" id="speed" min="0" max="100" value="20">
+            </div>
+            <div class="control-group">
+                <label>Horizontal Yaw <span id="yVal" class="val-disp">0°</span></label>
+                <input type="range" id="yaw" min="0" max="360" value="0">
+            </div>
+            <div class="control-group">
+                <label>Vertical Pitch <span id="pVal" class="val-disp">0°</span></label>
+                <input type="range" id="pitch" min="-90" max="90" value="0">
+            </div>
+            <hr style="opacity:0.1; margin: 15px 0;">
+            <div class="control-group">
+                <label>Blade Count <span id="bVal" class="val-disp">3</span></label>
+                <input type="range" id="bladeCount" min="2" max="12" step="1" value="3">
+            </div>
+            <div class="control-group">
+                <label>Helical Twist <span id="tVal" class="val-disp">0.7</span></label>
+                <input type="range" id="twist" min="0" max="2.5" step="0.05" value="0.7">
+            </div>
         </div>
 
-        <div class="control-group">
-            <label>Horizontal Yaw <span id="yVal" class="val-disp">0°</span></label>
-            <input type="range" id="yaw" min="0" max="360" value="0">
-        </div>
-
-        <div class="control-group">
-            <label>Vertical Pitch <span id="pVal" class="val-disp">0°</span></label>
-            <input type="range" id="pitch" min="-90" max="90" value="0">
-        </div>
-
-        <hr style="opacity:0.1; margin: 15px 0;">
-        
-        <div class="control-group">
-            <label>Blade Count <span id="bVal" class="val-disp">3</span></label>
-            <input type="range" id="bladeCount" min="2" max="12" step="1" value="3">
-        </div>
-
-        <div class="control-group">
-            <label>Helical Twist <span id="tVal" class="val-disp">0.7</span></label>
-            <input type="range" id="twist" min="0" max="2.5" step="0.05" value="0.7">
+        <div class="glass-panel">
+            <div class="title">DYNAMIC CALCULATIONS</div>
+            <div id="math-hud">
+                Calculating vectors...
+            </div>
         </div>
     </div>
 
@@ -84,6 +91,7 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+    // Scene Setup
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -93,31 +101,40 @@
     const controls = new OrbitControls(camera, renderer.domElement);
     camera.position.set(10, 8, 18);
 
-    // --- Brighter Aesthetics ---
-    scene.add(new THREE.AmbientLight(0xffffff, 0.4)); // Increased from 0.1
+    // Lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
     const dLight = new THREE.DirectionalLight(0xffffff, 0.8);
     dLight.position.set(5, 10, 7);
     scene.add(dLight);
     
-    // --- The Hub Beacon ---
+    // The Hub Beacon
     const beaconLight = new THREE.PointLight(0x00ffcc, 100, 50);
     scene.add(beaconLight);
-
-    const beaconCoreGeo = new THREE.SphereGeometry(0.4, 32, 32);
-    const beaconMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
-    const beaconMesh = new THREE.Mesh(beaconCoreGeo, beaconMat);
+    const beaconMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.4, 32, 32), 
+        new THREE.MeshBasicMaterial({ color: 0x00ffcc })
+    );
     scene.add(beaconMesh);
 
     let rotorGroup = new THREE.Group();
     scene.add(rotorGroup);
 
+    // Physics State
+    let angVel = 0;
+    const rho = 1.225; // Air density kg/m^3
+    const windVec = new THREE.Vector3();
+
     function buildRotor() {
+        // Only rebuild if parameters changed to save CPU cycles
         while(rotorGroup.children.length > 0) rotorGroup.remove(rotorGroup.children[0]);
         const count = parseInt(document.getElementById('bladeCount').value);
         const twistFactor = parseFloat(document.getElementById('twist').value);
         const radius = 8;
         
-        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.2, 32), new THREE.MeshStandardMaterial({color: 0x111111, metalness: 1, roughness: 0.1}));
+        const hub = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.7, 0.7, 1.2, 32), 
+            new THREE.MeshStandardMaterial({color: 0x111111, metalness: 1, roughness: 0.1})
+        );
         hub.rotation.x = Math.PI / 2;
         rotorGroup.add(hub);
 
@@ -129,11 +146,8 @@
                 let x = pos.getX(j);
                 let z = pos.getZ(j);
                 const t = (y/radius);
-                
-                // Helical Twist Application
                 const twist = t * twistFactor;
                 const taper = 1.0 - t * 0.85;
-                
                 pos.setXYZ(j, x * taper * Math.cos(twist) - z * Math.sin(twist), y, x * taper * Math.sin(twist) + z * Math.cos(twist));
             }
             bGeo.computeVertexNormals();
@@ -145,6 +159,7 @@
         }
     }
 
+    // Background Particle System
     const pCount = 2000;
     const pGeo = new THREE.BufferGeometry();
     const pPos = new Float32Array(pCount * 3);
@@ -153,12 +168,15 @@
     const windSys = new THREE.Points(pGeo, new THREE.PointsMaterial({color: 0x00ffcc, size: 0.08, transparent: true, opacity: 0.2}));
     scene.add(windSys);
 
-    let angVel = 0;
-    const windVec = new THREE.Vector3();
+    // Initial Build
+    buildRotor();
+
+    // Event listeners to rebuild only when needed
+    document.getElementById('bladeCount').addEventListener('input', buildRotor);
+    document.getElementById('twist').addEventListener('input', buildRotor);
 
     function animate() {
         requestAnimationFrame(animate);
-        buildRotor();
 
         const speed = parseFloat(document.getElementById('speed').value);
         const yaw = THREE.MathUtils.degToRad(parseFloat(document.getElementById('yaw').value));
@@ -166,33 +184,58 @@
         const count = parseInt(document.getElementById('bladeCount').value);
         const twistFactor = parseFloat(document.getElementById('twist').value);
 
+        // Update UI Text
         document.getElementById('sVal').innerText = speed;
         document.getElementById('yVal').innerText = document.getElementById('yaw').value + "°";
         document.getElementById('pVal').innerText = document.getElementById('pitch').value + "°";
         document.getElementById('bVal').innerText = count;
         document.getElementById('tVal').innerText = twistFactor;
 
+        // Calculate Wind Vector
         windVec.set(Math.sin(yaw)*Math.cos(pitch), Math.sin(pitch), Math.cos(yaw)*Math.cos(pitch)).normalize();
 
-        // Physics: Torque depends on alignment (Dot Product) and Twist Efficiency
-        const dot = windVec.dot(new THREE.Vector3(0, 0, 1));
-        const twistEfficiency = Math.max(0, 1.0 - Math.abs(twistFactor - 0.7) * 0.5);
-        const torque = speed * 0.00015 * dot * twistEfficiency;
-        const drag = angVel * (0.02 + count * 0.003);
-        
-        angVel += (torque - drag);
+        // --- ENHANCED PHYSICS ENGINE ---
+        const alignment = Math.max(0, windVec.dot(new THREE.Vector3(0, 0, 1))); // Dot product for face-on wind
+        const twistEff = Math.max(0, 1.0 - Math.abs(twistFactor - 0.7) * 0.5); // Efficiency curve
+        const sweptArea = Math.PI * Math.pow(8, 2);
+
+        // 1. Wind Torque: τ = 1/2 * ρ * v^2 * A * Cp (Simplified)
+        const torqueWind = 0.5 * rho * Math.pow(speed * 0.1, 2) * sweptArea * alignment * twistEff * 0.005;
+
+        // 2. Drag & Load Torque: τ_drag = ω * b + ω^2 * c
+        const dragCoeff = 0.02 + (count * 0.005);
+        const torqueLoad = (angVel * dragCoeff) + (Math.pow(angVel, 2) * 0.01);
+
+        // 3. Angular Acceleration: α = (τ_wind - τ_load) / Inertia
+        const netTorque = torqueWind - torqueLoad;
+        angVel += netTorque;
+        if (angVel < 0) angVel = 0;
+
+        // Rotate Rotor
         rotorGroup.rotation.z -= angVel;
 
-        const rpm = (angVel * 60) / (0.016 * 2 * Math.PI);
-        const power = Math.abs(0.5 * 1.225 * Math.PI * 64 * Math.pow(speed, 3) * 0.35 * dot * twistEfficiency) / 1000;
-        
-        document.getElementById('rpmDisp').innerHTML = `${Math.floor(rpm)}<span class="unit">RPM</span>`;
-        document.getElementById('pwrDisp').innerHTML = `${power.toFixed(2)}<span class="unit">kW</span>`;
+        // 4. Power Output based on RPM: P = τ_load * ω
+        const powerWatts = torqueLoad * angVel * 1000;
+        const rpm = (angVel * 60) / (0.016 * 2 * Math.PI); // Relative to frame time
 
+        // Update Displays
+        document.getElementById('rpmDisp').innerHTML = `${Math.floor(rpm)}<span class="unit">RPM</span>`;
+        document.getElementById('pwrDisp').innerHTML = `${(powerWatts / 1000).toFixed(2)}<span class="unit">kW</span>`;
+
+        // Update Math HUD
+        document.getElementById('math-hud').innerHTML = `
+            <div class="formula-line">τ_wind = ${torqueWind.toFixed(4)} Nm</div>
+            <div class="formula-line" style="color:#ff5555">τ_load = ${torqueLoad.toFixed(4)} Nm</div>
+            <hr style="opacity:0.2">
+            <div>ω (Angular Vel): ${angVel.toFixed(3)} rad/s</div>
+            <div style="color:var(--neon)">P = τ_load × ω</div>
+            <div style="color:var(--neon)">P = ${(powerWatts).toFixed(1)} Watts</div>
+        `;
+
+        // Aesthetics: Beacon & Wind
         const pulse = 1.0 + Math.sin(Date.now() * 0.005) * 0.2;
-        beaconLight.intensity = Math.min(rpm * 2, 500) * pulse;
-        beaconMesh.scale.setScalar(1 + (rpm / 500) * pulse);
-        
+        beaconLight.intensity = Math.min(rpm * 5, 800) * pulse;
+        beaconMesh.scale.setScalar(1 + (rpm / 800) * pulse);
         beaconMesh.position.set(0,0,1.2);
         beaconLight.position.set(0,0,1.5);
 
@@ -213,6 +256,12 @@
         renderer.render(scene, camera);
     }
     animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
 </script>
 </body>
 </html>
